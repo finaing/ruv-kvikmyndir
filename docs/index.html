@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="is">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kvikmyndir á RÚV</title>
+<meta name="description" content="Kvikmyndir sem eru aðgengilegar í spilara RÚV, raðað eftir IMDb-einkunn.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c8102e'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --surface: #ffffff;
+    --text: #1b1b1f;
+    --muted: #63636e;
+    --line: #e3e1db;
+    --accent: #c8102e;
+    --chip: #efede8;
+    --warn-bg: #fff1d6;
+    --warn-text: #8a5300;
+    --score-hi: #1f7a4a;
+    --score-mid: #8a6d00;
+    --score-lo: #7a7a85;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121215; --surface: #1c1c21; --text: #ececf0; --muted: #9c9ca8;
+      --line: #2c2c33; --accent: #ff4d5e; --chip: #26262d;
+      --warn-bg: #3a2c10; --warn-text: #ffc66b;
+      --score-hi: #4fd18b; --score-mid: #e6c34a; --score-lo: #8d8d98;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121215; --surface: #1c1c21; --text: #ececf0; --muted: #9c9ca8;
+    --line: #2c2c33; --accent: #ff4d5e; --chip: #26262d;
+    --warn-bg: #3a2c10; --warn-text: #ffc66b;
+    --score-hi: #4fd18b; --score-mid: #e6c34a; --score-lo: #8d8d98;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+
+  header { padding: 40px 0 20px; }
+  h1 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.3rem); letter-spacing: -.02em; line-height: 1.15; }
+  h1 span { color: var(--accent); }
+  .sub { margin: 8px 0 0; color: var(--muted); }
+
+  .controls {
+    position: sticky; top: 0; z-index: 2; background: var(--bg);
+    display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .controls input[type=search], .controls select {
+    font: inherit; font-size: .95rem; color: var(--text); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0;
+  }
+  .controls input[type=search] { flex: 1 1 220px; }
+  .controls select { flex: 0 1 auto; }
+  .controls label { display: flex; align-items: center; gap: 6px; font-size: .9rem; color: var(--muted); padding: 0 4px; }
+  .count { margin: 14px 0 6px; font-size: .9rem; color: var(--muted); }
+
+  ol { list-style: none; margin: 0; padding: 0 0 48px; }
+  .film {
+    display: grid; grid-template-columns: 2.2rem 168px 1fr auto; gap: 16px; align-items: start;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin-bottom: 10px; box-shadow: var(--shadow);
+  }
+  .rank { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 2px; text-align: right; }
+  .thumb {
+    display: block; aspect-ratio: 16/9; width: 100%; border-radius: 8px; overflow: hidden; background: var(--chip);
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .info { min-width: 0; }
+  .title { margin: 0; font-size: 1.1rem; line-height: 1.3; }
+  .title a { text-decoration: none; }
+  .title a:hover { text-decoration: underline; }
+  .meta { margin: 2px 0 6px; color: var(--muted); font-size: .9rem; }
+  .desc {
+    margin: 0; font-size: .9rem; color: var(--muted);
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .film.open .desc { -webkit-line-clamp: unset; line-clamp: unset; }
+  .desc-toggle { background: none; border: 0; padding: 0; font: inherit; font-size: .85rem; color: var(--accent); cursor: pointer; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tag { font-size: .78rem; padding: 2px 8px; border-radius: 99px; background: var(--chip); color: var(--muted); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn-text); font-weight: 600; }
+
+  .score { text-align: right; min-width: 76px; }
+  .score b { display: block; font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .score b.hi { color: var(--score-hi); } .score b.mid { color: var(--score-mid); } .score b.lo { color: var(--score-lo); }
+  .score small { display: block; font-size: .78rem; color: var(--muted); margin-top: 4px; }
+  .score a { font-size: .78rem; color: var(--muted); }
+  .score .none { color: var(--muted); font-size: .85rem; }
+
+  footer { color: var(--muted); font-size: .85rem; padding: 0 0 40px; }
+  .empty { padding: 32px 0; color: var(--muted); }
+
+  @media (max-width: 640px) {
+    .film { grid-template-columns: 96px 1fr auto; gap: 12px; padding: 12px; }
+    .rank { display: none; }
+    .score b { font-size: 1.3rem; }
+    .score { min-width: 0; }
+    .desc { display: none; }
+    .desc-toggle { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Kvikmyndir á <span>RÚV</span></h1>
+    <p class="sub" id="sub">Allar kvikmyndir í spilara RÚV, raðað eftir IMDb-einkunn.</p>
+  </header>
+
+  <div class="controls">
+    <input type="search" id="leit" placeholder="Leita að titli, leikara, leikstjóra…" aria-label="Leita">
+    <select id="rodun" aria-label="Röðun">
+      <option value="vegin">Hæsta einkunn</option>
+      <option value="imdb">Hæsta IMDb-einkunn (óvegin)</option>
+      <option value="vinsaelt">Flest atkvæði</option>
+      <option value="fer">Fer bráðum</option>
+      <option value="nyjast">Nýjustu myndirnar</option>
+    </select>
+    <select id="flokkur" aria-label="Flokkur"><option value="">Allir flokkar</option></select>
+    <label><input type="checkbox" id="allar"> Sýna líka myndir án einkunnar</label>
+  </div>
+
+  <p class="count" id="count"></p>
+  <ol id="listi"></ol>
+
+  <footer>
+    <p>„Hæsta einkunn“ er vegin eftir fjölda atkvæða (eins og IMDb Top 250), svo myndir með fá atkvæði
+    trónir ekki efst. Einkunnir koma úr <a href="https://developer.imdb.com/non-commercial-datasets/">opinberum gagnasöfnum IMDb</a>;
+    upplýsingar og myndir frá <a href="https://www.ruv.is/sjonvarp/flokkur/kvikmyndir">RÚV</a>.
+    Óopinber síða, ekki tengd RÚV eða IMDb.</p>
+  </footer>
+</div>
+
+<script src="gogn.js"></script>
+<script>
+(function () {
+  const FLOKKAR = {
+    Action: "Hasar", Adventure: "Ævintýri", Animation: "Teiknimynd", Biography: "Ævisaga",
+    Comedy: "Gaman", Crime: "Glæpir", Documentary: "Heimildarmynd", Drama: "Drama",
+    Family: "Fjölskylda", Fantasy: "Fantasía", History: "Saga", Horror: "Hrollvekja",
+    Music: "Tónlist", Musical: "Söngleikur", Mystery: "Ráðgáta", Romance: "Rómantík",
+    "Sci-Fi": "Vísindaskáldskapur", Short: "Stuttmynd", Sport: "Íþróttir", Thriller: "Spenna",
+    War: "Stríð", Western: "Vestri"
+  };
+  const $ = (id) => document.getElementById(id);
+  const gogn = window.RUV_GOGN;
+  if (!gogn) {
+    $("listi").innerHTML = '<li class="empty">Engin gögn fundust. Keyrðu <code>python ruv_kvikmyndir.py</code> til að búa til docs/gogn.js.</li>';
+    return;
+  }
+
+  const idag = new Date(); idag.setHours(0, 0, 0, 0);
+  const dagarEftir = (d) => d ? Math.round((new Date(d + "T00:00:00") - idag) / 864e5) : null;
+  const myndir = gogn.myndir
+    .map((m) => ({ ...m, flokkar: m.imdb_flokkar ? m.imdb_flokkar.split(",") : [], dagar: dagarEftir(m["aðgengileg_til"]) }))
+    .filter((m) => m.dagar === null || m.dagar >= 0);
+
+  const MAN = ["janúar", "febrúar", "mars", "apríl", "maí", "júní", "júlí", "ágúst", "september", "október", "nóvember", "desember"];
+  const uppfaert = new Date(gogn["uppfært"]);
+  $("sub").textContent = `${myndir.length} kvikmyndir í spilara RÚV, raðað eftir IMDb-einkunn. Uppfært ${uppfaert.getDate()}. ${MAN[uppfaert.getMonth()]} ${uppfaert.getFullYear()}.`;
+
+  const allirFlokkar = [...new Set(myndir.flatMap((m) => m.flokkar))].sort((a, b) => (FLOKKAR[a] || a).localeCompare(FLOKKAR[b] || b, "is"));
+  for (const f of allirFlokkar) $("flokkur").add(new Option(FLOKKAR[f] || f, f));
+
+  const fmtNum = new Intl.NumberFormat("is-IS");
+  const fmtDags = (d) => { const t = new Date(d + "T00:00:00"); return `${t.getDate()}. ${MAN[t.getMonth()].slice(0, 3)}.`; };
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const stadla = (s) => String(s ?? "").toLocaleLowerCase("is").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const nullSidast = (a, b, f) => (a == null) - (b == null) || f();
+
+  const RODUN = {
+    vegin: (a, b) => nullSidast(a.vegin_einkunn, b.vegin_einkunn, () => b.vegin_einkunn - a.vegin_einkunn),
+    imdb: (a, b) => nullSidast(a.imdb_einkunn, b.imdb_einkunn, () => b.imdb_einkunn - a.imdb_einkunn || b["imdb_atkvæði"] - a["imdb_atkvæði"]),
+    vinsaelt: (a, b) => nullSidast(a["imdb_atkvæði"], b["imdb_atkvæði"], () => b["imdb_atkvæði"] - a["imdb_atkvæði"]),
+    fer: (a, b) => nullSidast(a.dagar, b.dagar, () => a.dagar - b.dagar || (b.vegin_einkunn ?? 0) - (a.vegin_einkunn ?? 0)),
+    nyjast: (a, b) => nullSidast(a["ár"] ?? a.imdb_ár, b["ár"] ?? b.imdb_ár, () => (b["ár"] ?? b.imdb_ár) - (a["ár"] ?? a.imdb_ár)),
+  };
+
+  function einkunnFlokkur(e) { return e >= 7.3 ? "hi" : e >= 6.3 ? "mid" : "lo"; }
+
+  function lina(m, i) {
+    const ar = m["ár"] ?? m.imdb_ár;
+    const erl = m.erl_titill && m.erl_titill !== m["íslenskur_titill"] ? m.erl_titill
+              : (!m.erl_titill && m.imdb_titill && m.imdb_titill !== m["íslenskur_titill"] ? m.imdb_titill : null);
+    const meta = [erl, ar, m["lengd_mín"] ? `${m["lengd_mín"]} mín.` : null].filter(Boolean).map(esc).join(" · ");
+    const tags = m.flokkar.map((f) => `<span class="tag">${esc(FLOKKAR[f] || f)}</span>`);
+    if (m.dagar !== null && m.dagar <= 7) {
+      tags.unshift(`<span class="tag warn">${m.dagar === 0 ? "Fer í dag" : m.dagar === 1 ? "Fer á morgun" : `Fer eftir ${m.dagar} daga`}</span>`);
+    } else if (m["aðgengileg_til"]) {
+      tags.push(`<span class="tag">Til ${esc(fmtDags(m["aðgengileg_til"]))}</span>`);
+    }
+    const einkunn = m.imdb_einkunn != null
+      ? `<b class="${einkunnFlokkur(m.vegin_einkunn)}" title="Vegin einkunn: ${m.vegin_einkunn}">${m.imdb_einkunn.toFixed(1)}</b>
+         <small>${fmtNum.format(m["imdb_atkvæði"])} atkv.</small>
+         <a href="${esc(m.imdb_hlekkur)}" target="_blank" rel="noopener">IMDb ↗</a>`
+      : `<span class="none">Engin<br>einkunn</span>`;
+    return `<li class="film">
+      <span class="rank">${i + 1}</span>
+      <a class="thumb" href="${esc(m.hlekkur)}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">
+        ${m.mynd ? `<img src="${esc(m.mynd)}" alt="" loading="lazy">` : ""}
+      </a>
+      <div class="info">
+        <h2 class="title"><a href="${esc(m.hlekkur)}" target="_blank" rel="noopener">${esc(m["íslenskur_titill"])}</a></h2>
+        <p class="meta">${meta}</p>
+        <p class="desc">${esc(m["lýsing"])}</p>
+        <button class="desc-toggle" type="button">Meira</button>
+        <div class="tags">${tags.join("")}</div>
+      </div>
+      <div class="score">${einkunn}</div>
+    </li>`;
+  }
+
+  function teikna() {
+    const q = stadla($("leit").value.trim());
+    const flokkur = $("flokkur").value;
+    const allar = $("allar").checked;
+    const synd = myndir
+      .filter((m) => allar || m.imdb_einkunn != null)
+      .filter((m) => !flokkur || m.flokkar.includes(flokkur))
+      .filter((m) => !q || stadla([m["íslenskur_titill"], m.erl_titill, m.imdb_titill, m["lýsing"]].join(" ")).includes(q))
+      .sort(RODUN[$("rodun").value]);
+    $("count").textContent = synd.length === myndir.length ? `${synd.length} myndir` : `${synd.length} af ${myndir.length} myndum`;
+    $("listi").innerHTML = synd.length ? synd.map(lina).join("") : '<li class="empty">Engar myndir passa við leitina.</li>';
+  }
+
+  $("listi").addEventListener("click", (e) => {
+    if (!e.target.classList.contains("desc-toggle")) return;
+    const li = e.target.closest(".film");
+    e.target.textContent = li.classList.toggle("open") ? "Minna" : "Meira";
+  });
+  for (const id of ["leit", "rodun", "flokkur", "allar"]) $(id).addEventListener("input", teikna);
+  teikna();
+})();
+</script>
+</body>
+</html>
