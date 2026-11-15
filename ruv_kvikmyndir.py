@@ -105,6 +105,9 @@ def ruv_upplysingar(id_, mynd):
         lysing = next((p for p in malsgreinar if p), "")
 
     mynd["erl_titill"] = (erl_titill or "").strip() or None
+    # RÚV setur stundum heiti myndaraðar (t.d. „Íslenskt bíóhaust“) í reitinn fyrir erlendan titil
+    if mynd["erl_titill"] and re.match(r"íslenskt bíóhaust", mynd["erl_titill"], re.IGNORECASE):
+        mynd["erl_titill"] = None
     mynd["lýsing"] = lysing.strip()
     mynd["ár"] = finna_ar(lysing)
     if thattur.get("duration"):
@@ -189,6 +192,17 @@ def imdb_uppfletting(imdb, titlar, ar):
     return None
 
 
+def er_islensk(mynd, nidurstada):
+    """Íslensk ef fyrsta setning lýsingar RÚV segir það („Íslensk kvikmynd frá…“),
+    eða ef myndin hefur engan erlendan titil og upprunalegi titillinn á IMDb er sá íslenski."""
+    fyrsta_setning = re.split(r"(?<=[.!?])\s", mynd.get("lýsing") or "", maxsplit=1)[0]
+    if re.search(r"\bíslensk", fyrsta_setning, re.IGNORECASE):
+        return True
+    if nidurstada is not None and not mynd.get("erl_titill"):
+        return stadla(nidurstada["originalTitle"]) == stadla(mynd["íslenskur_titill"])
+    return False
+
+
 # ---------------------------------------------------------------- Keyrsla
 
 
@@ -222,6 +236,7 @@ def main():
     for mynd in myndir.values():
         nidurstada = imdb_uppfletting(
             imdb, [mynd.get("erl_titill"), mynd["íslenskur_titill"]], mynd.get("ár"))
+        mynd["íslensk"] = er_islensk(mynd, nidurstada)
         if nidurstada is None:
             continue
         mynd["imdb_einkunn"] = nidurstada["averageRating"]
@@ -241,7 +256,7 @@ def main():
     v, r, m = df["imdb_atkvæði"], df["imdb_einkunn"], LAGMARKSATKVAEDI
     df["vegin_einkunn"] = ((v * r + m * medaltal) / (v + m)).round(2)
 
-    dalkar = ["íslenskur_titill", "erl_titill", "ár", "vegin_einkunn", "imdb_einkunn",
+    dalkar = ["íslenskur_titill", "erl_titill", "ár", "íslensk", "vegin_einkunn", "imdb_einkunn",
               "imdb_atkvæði", "lengd_mín", "aðgengileg_til", "imdb_titill", "imdb_ár",
               "imdb_hlekkur", "imdb_flokkar", "lýsing", "hlekkur", "mynd"]
     df = (df.reindex(columns=dalkar)

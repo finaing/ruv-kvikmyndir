@@ -129,6 +129,7 @@
       <option value="nyjast">Nýjustu myndirnar</option>
     </select>
     <select id="flokkur" aria-label="Flokkur"><option value="">Allir flokkar</option></select>
+    <label><input type="checkbox" id="islenskar"> Aðeins íslenskar myndir</label>
     <label><input type="checkbox" id="allar"> Sýna líka myndir án einkunnar</label>
   </div>
 
@@ -226,8 +227,10 @@
     const q = stadla($("leit").value.trim());
     const flokkur = $("flokkur").value;
     const allar = $("allar").checked;
+    const islenskar = $("islenskar").checked;
     const synd = myndir
       .filter((m) => allar || m.imdb_einkunn != null)
+      .filter((m) => !islenskar || m["íslensk"])
       .filter((m) => !flokkur || m.flokkar.includes(flokkur))
       .filter((m) => !q || stadla([m["íslenskur_titill"], m.erl_titill, m.imdb_titill, m["lýsing"]].join(" ")).includes(q))
       .sort(RODUN[$("rodun").value]);
@@ -240,7 +243,11 @@
     const li = e.target.closest(".film");
     e.target.textContent = li.classList.toggle("open") ? "Minna" : "Meira";
   });
-  for (const id of ["leit", "rodun", "flokkur", "allar"]) $(id).addEventListener("input", teikna);
+  for (const id of ["leit", "rodun", "flokkur", "islenskar", "allar"]) $(id).addEventListener("input", teikna);
+  // Hægt að deila beinum hlekk: …/#islenskar
+  $("islenskar").checked = location.hash === "#islenskar";
+  $("islenskar").addEventListener("change", () =>
+    history.replaceState(null, "", $("islenskar").checked ? "#islenskar" : location.pathname + location.search));
   teikna();
 })();
 </script>
