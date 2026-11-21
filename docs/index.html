@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kvikmyndir á RÚV</title>
-<meta name="description" content="Kvikmyndir sem eru aðgengilegar í spilara RÚV, raðað eftir IMDb-einkunn.">
+<meta name="description" content="Kvikmyndir sem eru aðgengilegar í spilara RÚV, raðað eftir IMDb-einkunn, með einkunnum frá Rotten Tomatoes og Metacritic.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230073a0'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
 <style>
   :root {
@@ -98,6 +98,10 @@
   .score b.hi { color: var(--score-hi); } .score b.mid { color: var(--score-mid); } .score b.lo { color: var(--score-lo); }
   .score small { display: block; font-size: .78rem; color: var(--muted); margin-top: 4px; }
   .score a { font-size: .78rem; color: var(--muted); }
+  .score .stakar { white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 6px; }
+  .score .heimild { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 3px; text-decoration: none; }
+  .score a.heimild:hover { color: var(--text); }
+  .score .merki { flex: none; display: block; }
   .score .none { color: var(--muted); font-size: .85rem; }
 
   footer { color: var(--muted); font-size: .85rem; padding: 0 0 40px; }
@@ -148,10 +152,7 @@
   <ol id="listi"></ol>
 
   <footer>
-    <p>„Hæsta einkunn“ er vegin eftir fjölda atkvæða (eins og IMDb Top 250), svo myndir með fá atkvæði
-    trónir ekki efst. Einkunnir koma úr <a href="https://developer.imdb.com/non-commercial-datasets/">opinberum gagnasöfnum IMDb</a>;
-    upplýsingar og myndir frá <a href="https://www.ruv.is/sjonvarp/flokkur/kvikmyndir">RÚV</a>.
-    Óopinber síða, ekki tengd RÚV eða IMDb.</p>
+    <p>„Hæsta einkunn“ er IMDb-einkunn vegin eftir fjölda atkvæða. Einkunnir af vefjunum Rotten Tomatoes og Metacritic eru sýndar til fróðleiks en myndum er ekki raðað eftir þeim, þar sem fæstar íslenskar myndir hafa þær. IMDb-einkunnir koma úr <a href="https://developer.imdb.com/non-commercial-datasets/">opinberum gagnasöfnum IMDb</a> og Rotten Tomatoes og Metacritic eru fengnar úr <a href="https://www.omdbapi.com/">OMDb</a>; upplýsingar um kvikmyndirnar eru annars af vef <a href="https://www.ruv.is/sjonvarp/flokkur/kvikmyndir">RÚV</a>. Athugið að þessi síða er ekki tengd RÚV, IMDb, Rotten Tomatoes eða Metacritic.</p>
   </footer>
 </div>
 
@@ -200,6 +201,14 @@
     nyjast: (a, b) => nullSidast(a["ár"] ?? a.imdb_ár, b["ár"] ?? b.imdb_ár, () => (b["ár"] ?? b.imdb_ár) - (a["ár"] ?? a.imdb_ár)),
   };
 
+  // Lítil merki heimilda (innbyggð SVG, engar utanaðkomandi myndir)
+  const MERKI = {
+    imdb: '<svg class="merki" viewBox="0 0 28 14" width="28" height="14" aria-label="IMDb"><rect width="28" height="14" rx="2.5" fill="#F5C518"/><text x="14" y="10.4" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="9" fill="#000">IMDb</text></svg>',
+    rt: '<svg class="merki" viewBox="0 0 14 14" width="14" height="14" aria-label="Rotten Tomatoes"><circle cx="7" cy="8" r="5.6" fill="#FA320A"/><path d="M7 2.6c-1.2-1.1-2.6-.9-3.4-.4 1 .2 1.7.7 2 1.4-.9-.2-1.9.1-2.5.8 1.2-.1 2.4.2 3.1.9.4-.7 1.3-1.1 2.4-1.1-.3-.7-1-1.1-1.7-1.2.5-.6 1.2-.9 2-.9-.6-.5-1.3-.5-1.9.5z" fill="#00912D"/></svg>',
+    rtRotid: '<svg class="merki" viewBox="0 0 14 14" width="14" height="14" aria-label="Rotten Tomatoes (rotin)"><path d="M7 1.2l1.2 2.9 2.6-1.6-.6 3 3 .3-2.3 2 2 2.3-3-.1.2 3-2.4-1.9L6 13.9 5.6 11l-2.9 1 1.2-2.8-2.8-1.2 2.8-1.3-1.5-2.6 3 .5z" fill="#0AC855"/></svg>',
+    mc: '<svg class="merki" viewBox="0 0 14 14" width="14" height="14" aria-label="Metacritic"><circle cx="7" cy="7" r="6.5" fill="#000" stroke="#FFBD3F" stroke-width="1"/><text x="7" y="10.3" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="9" fill="#fff">M</text></svg>',
+  };
+
   function einkunnFlokkur(e) { return e >= 7.3 ? "hi" : e >= 6.3 ? "mid" : "lo"; }
 
   function lina(m, i) {
@@ -213,10 +222,14 @@
     } else if (m["aðgengileg_til"]) {
       tags.push(`<span class="tag">Til ${esc(fmtDags(m["aðgengileg_til"]))}</span>`);
     }
+    const stakar = [
+      `<a class="heimild" href="${esc(m.imdb_hlekkur)}" target="_blank" rel="noopener" title="Opna á IMDb">${MERKI.imdb}${fmtNum.format(m["imdb_atkvæði"])} atkv.</a>`,
+      m.rt_einkunn != null ? `<span class="heimild" title="Rotten Tomatoes (Tomatometer)">${m.rt_einkunn >= 60 ? MERKI.rt : MERKI.rtRotid}${m.rt_einkunn}%</span>` : null,
+      m.mc_einkunn != null ? `<span class="heimild" title="Metacritic (Metascore)">${MERKI.mc}${m.mc_einkunn}</span>` : null,
+    ].filter(Boolean);
     const einkunn = m.imdb_einkunn != null
-      ? `<b class="${einkunnFlokkur(m.vegin_einkunn)}" title="Vegin einkunn: ${m.vegin_einkunn}">${m.imdb_einkunn.toFixed(1)}</b>
-         <small>${fmtNum.format(m["imdb_atkvæði"])} atkv.</small>
-         <a href="${esc(m.imdb_hlekkur)}" target="_blank" rel="noopener">IMDb ↗</a>`
+      ? `<b class="${einkunnFlokkur(m.vegin_einkunn)}" title="IMDb · vegin einkunn: ${m.vegin_einkunn}">${m.imdb_einkunn.toFixed(1)}</b>
+         <small class="stakar">${stakar.join("")}</small>`
       : `<span class="none">Engin<br>einkunn</span>`;
     return `<li class="film">
       <span class="rank">${i + 1}</span>

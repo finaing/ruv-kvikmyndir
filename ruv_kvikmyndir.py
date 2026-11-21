@@ -7,6 +7,7 @@ einkanota). Þau eru sótt einu sinni og endurnýjuð vikulega.
 """
 import csv
 import json
+import os
 import random
 import re
 import time
@@ -31,6 +32,13 @@ VEFGOGN = MAPPA / "docs" / "gogn.js"  # lesið af docs/index.html (GitHub Pages)
 HAMARKSALDUR_GAGNA = 7 * 24 * 3600  # sekúndur; sækja IMDb-gögn aftur eftir viku
 LAGMARKSATKVAEDI = 1000  # m í veginni einkunn: (v·R + m·C) / (v + m)
 TEGUNDIR = {"movie", "tvMovie", "short", "video", "tvSpecial"}
+
+# OMDb (https://www.omdbapi.com/) gefur Rotten Tomatoes- og Metacritic-einkunnir eftir IMDb-auðkenni.
+# Lykill í umhverfisbreytunni OMDB_API_KEY eða í omdb_lykill.txt (í .gitignore, aldrei í git).
+OMDB_SLOD = "https://www.omdbapi.com/"
+OMDB_LYKILSKRA = MAPPA / "omdb_lykill.txt"
+OMDB_SKYNDIMINNI = GAGNAMAPPA / "omdb.json"
+OMDB_HAMARKSALDUR = 30 * 24 * 3600  # sekúndur; einkunnir breytast hægt
 
 session = requests.Session()
 session.headers["User-Agent"] = "Mozilla/5.0 (ruv_kvikmyndir; einkaverkefni)"
@@ -203,6 +211,69 @@ def er_islensk(mynd, nidurstada):
     return False
 
 
+# ---------------------------------------------------------------- OMDb
+
+
+def omdb_lykill():
+    lykill = os.environ.get("OMDB_API_KEY", "").strip()
+    if not lykill and OMDB_LYKILSKRA.exists():
+        lykill = OMDB_LYKILSKRA.read_text(encoding="utf-8").strip()
+    return lykill or None
+
+
+def lesa_omdb_einkunnir(svar):
+    """Breytir Ratings-lista OMDb í tölur á kvarðanum 0–100.
+
+    „96%“ (Rotten Tomatoes) → 96, „86/100“ (Metacritic) → 86.
+    """
+    einkunnir = {}
+    heiti = {"Rotten Tomatoes": "rt", "Metacritic": "mc"}
+    for e in svar.get("Ratings") or []:
+        lykill = heiti.get(e.get("Source"))
+        m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(%|/\s*100)", e.get("Value") or "")
+        if lykill and m:
+            einkunnir[lykill] = round(float(m.group(1)))
+    return einkunnir
+
+
+def omdb_einkunnir(tconst_listi):
+    """Skilar {tconst: {"rt": .., "mc": ..}} og geymir svör í skyndiminni.
+
+    Án lykils er aðeins notað það sem þegar er í skyndiminni.
+    """
+    try:
+        minni = json.loads(OMDB_SKYNDIMINNI.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        minni = {}
+    lykill = omdb_lykill()
+    vantar = [t for t in tconst_listi
+              if time.time() - minni.get(t, {}).get("sótt", 0) > OMDB_HAMARKSALDUR]
+    if vantar and not lykill:
+        print(f"Enginn OMDb-lykill (OMDB_API_KEY eða {OMDB_LYKILSKRA.name}); "
+              f"sleppi Rotten Tomatoes/Metacritic fyrir {len(vantar)} myndir.")
+        vantar = []
+
+    for tconst in tqdm(vantar, desc="Sæki einkunnir frá OMDb"):
+        try:
+            svar = session.get(OMDB_SLOD, params={"i": tconst, "apikey": lykill},
+                               timeout=30).json()
+        except (requests.RequestException, ValueError) as villa:
+            tqdm.write(f"OMDb-villa við {tconst}: {villa}")
+            continue
+        if svar.get("Response") == "False" and "not found" not in svar.get("Error", "").lower():
+            # Rangur lykill eða dagskvóti búinn; reyna aftur í næstu keyrslu
+            tqdm.write(f"OMDb: {svar.get('Error')}. Hætti að sækja.")
+            break
+        minni[tconst] = {"sótt": int(time.time()), **lesa_omdb_einkunnir(svar)}
+        time.sleep(0.1)
+
+    if vantar:
+        GAGNAMAPPA.mkdir(exist_ok=True)
+        OMDB_SKYNDIMINNI.write_text(json.dumps(minni, ensure_ascii=False, indent=1),
+                                    encoding="utf-8")
+    return {t: minni[t] for t in tconst_listi if t in minni}
+
+
 # ---------------------------------------------------------------- Keyrsla
 
 
@@ -247,6 +318,13 @@ def main():
         if pd.notna(nidurstada["startYear"]):
             mynd["imdb_ár"] = int(nidurstada["startYear"])
         mynd["imdb_hlekkur"] = f"https://www.imdb.com/title/{nidurstada['tconst']}/"
+        mynd["tconst"] = nidurstada["tconst"]
+
+    omdb = omdb_einkunnir([m["tconst"] for m in myndir.values() if "tconst" in m])
+    for mynd in myndir.values():
+        e = omdb.get(mynd.get("tconst"), {})
+        mynd["rt_einkunn"] = e.get("rt")
+        mynd["mc_einkunn"] = e.get("mc")
 
     df = pd.DataFrame(list(myndir.values()))
     if "imdb_einkunn" not in df:
@@ -255,14 +333,18 @@ def main():
     medaltal = df["imdb_einkunn"].mean()
     v, r, m = df["imdb_atkvæði"], df["imdb_einkunn"], LAGMARKSATKVAEDI
     df["vegin_einkunn"] = ((v * r + m * medaltal) / (v + m)).round(2)
+    # Rotten Tomatoes og Metacritic eru aðeins sýndar, ekki notaðar í röðun: fæstar íslenskar
+    # myndir hafa þær, og RT (hlutfall jákvæðra dóma) myndi lyfta þeim myndum sem hafa þær.
+    for dalkur in ("rt_einkunn", "mc_einkunn"):
+        df[dalkur] = pd.to_numeric(df[dalkur], errors="coerce")
 
     dalkar = ["íslenskur_titill", "erl_titill", "ár", "íslensk", "vegin_einkunn", "imdb_einkunn",
-              "imdb_atkvæði", "lengd_mín", "aðgengileg_til", "imdb_titill", "imdb_ár",
-              "imdb_hlekkur", "imdb_flokkar", "lýsing", "hlekkur", "mynd"]
+              "imdb_atkvæði", "rt_einkunn", "mc_einkunn", "lengd_mín", "aðgengileg_til",
+              "imdb_titill", "imdb_ár", "imdb_hlekkur", "imdb_flokkar", "lýsing", "hlekkur", "mynd"]
     df = (df.reindex(columns=dalkar)
           .sort_values(["vegin_einkunn", "imdb_einkunn"], ascending=False, na_position="last")
           .astype({"ár": "Int64", "imdb_ár": "Int64", "imdb_atkvæði": "Int64",
-                   "lengd_mín": "Int64"}))
+                   "rt_einkunn": "Int64", "mc_einkunn": "Int64", "lengd_mín": "Int64"}))
     # utf-8-sig svo Excel sýni íslenska stafi rétt
     df.to_csv(UTTAKSSKRA, index=False, encoding="utf-8-sig")
     skrifa_vefgogn(df)
@@ -270,7 +352,7 @@ def main():
     fundnar = df["imdb_einkunn"].notna()
     print(f"\n{fundnar.sum()} af {len(df)} myndum fundust á IMDb. Vistað í {UTTAKSSKRA.name}\n")
     print(df.loc[fundnar, ["íslenskur_titill", "ár", "vegin_einkunn", "imdb_einkunn",
-                           "imdb_atkvæði", "aðgengileg_til"]].head(15).to_string(index=False))
+                           "rt_einkunn", "mc_einkunn", "aðgengileg_til"]].head(15).to_string(index=False))
     if (~fundnar).any():
         print("\nFundust ekki á IMDb:")
         for _, rod in df[~fundnar].iterrows():
