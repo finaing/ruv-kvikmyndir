@@ -64,6 +64,7 @@
   .controls input[type=search] { flex: 1 1 220px; }
   .controls select { flex: 0 1 auto; }
   .controls label { display: flex; align-items: center; gap: 6px; font-size: .9rem; color: var(--muted); padding: 0 4px; }
+  .controls .checks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .count { margin: 14px 0 6px; font-size: .9rem; color: var(--muted); }
 
   ol { list-style: none; margin: 0; padding: 0 0 48px; }
@@ -102,6 +103,14 @@
   footer { color: var(--muted); font-size: .85rem; padding: 0 0 40px; }
   .empty { padding: 32px 0; color: var(--muted); }
 
+  /* Tvær myndir í röð á breiðum skjám */
+  @media (min-width: 1000px) {
+    .wrap { max-width: 1280px; }
+    ol { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .film { margin-bottom: 0; grid-template-columns: 2rem 136px 1fr auto; gap: 12px; }
+    .empty { grid-column: 1 / -1; }
+  }
+
   @media (max-width: 640px) {
     .film { grid-template-columns: 96px 1fr auto; gap: 12px; padding: 12px; }
     .rank { display: none; }
@@ -129,8 +138,10 @@
       <option value="nyjast">Nýjustu myndirnar</option>
     </select>
     <select id="flokkur" aria-label="Flokkur"><option value="">Allir flokkar</option></select>
-    <label><input type="checkbox" id="islenskar"> Aðeins íslenskar myndir</label>
-    <label><input type="checkbox" id="allar"> Sýna líka myndir án einkunnar</label>
+    <div class="checks">
+      <label><input type="checkbox" id="islenskar"> Aðeins íslenskar myndir</label>
+      <label><input type="checkbox" id="allar"> Sýna líka myndir án einkunnar</label>
+    </div>
   </div>
 
   <p class="count" id="count"></p>
@@ -170,7 +181,7 @@
 
   const MAN = ["janúar", "febrúar", "mars", "apríl", "maí", "júní", "júlí", "ágúst", "september", "október", "nóvember", "desember"];
   const uppfaert = new Date(gogn["uppfært"]);
-  $("sub").textContent = `${myndir.length} kvikmyndir í spilara RÚV, raðað eftir IMDb-einkunn. Uppfært ${uppfaert.getDate()}. ${MAN[uppfaert.getMonth()]} ${uppfaert.getFullYear()}.`;
+  $("sub").textContent = `${myndir.length} ${myndir.length % 10 === 1 && myndir.length % 100 !== 11 ? "kvikmynd" : "kvikmyndir"} í spilara RÚV, raðað eftir IMDb-einkunn. Uppfært ${uppfaert.getDate()}. ${MAN[uppfaert.getMonth()]} ${uppfaert.getFullYear()}.`;
 
   const allirFlokkar = [...new Set(myndir.flatMap((m) => m.flokkar))].sort((a, b) => (FLOKKAR[a] || a).localeCompare(FLOKKAR[b] || b, "is"));
   for (const f of allirFlokkar) $("flokkur").add(new Option(FLOKKAR[f] || f, f));
