@@ -1,5 +1,8 @@
-"""Finnur kvikmyndir sem eru aðgengilegar á RÚV, flettir þeim upp í
+"""Finnur kvikmyndir og sjónvarpsþætti sem eru aðgengileg á RÚV, flettir þeim upp í
 gagnasöfnum IMDb og raðar þeim eftir einkunn.
+
+Kvikmyndir koma af flokkasíðunni /sjonvarp/flokkur/kvikmyndir. Þættir hafa enga slíka
+síðu, svo þeir eru sóttir úr völdum renningum (fyrirsögnum) á yfirlitssíðunni /sjonvarp/.
 
 IMDb lokar á sjálfvirka skröpun á leitarsíðunni sinni (CAPTCHA), svo í stað
 þess eru notuð opinber gagnasöfn IMDb (https://datasets.imdbws.com/, leyfð til
@@ -21,17 +24,31 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 START_URL = "https://www.ruv.is/sjonvarp/flokkur/kvikmyndir"
+YFIRLIT_URL = "https://www.ruv.is/sjonvarp/"
 BASE_URL = "https://www.ruv.is"
+
+# Renningar á yfirlitssíðunni sem þættir eru sóttir úr. RÚV breytir þeim stundum;
+# fyrirsagnir sem finnast ekki eru einfaldlega hunsaðar.
+RENNINGAR = [
+    "Leiknar þáttaraðir", "Norrænt", "Breskar þáttaraðir", "Íslenskar þáttaraðir",
+    "Heimildarmyndir og fróðleikur", "Íslenskar heimildarmyndir", "Íslenskt heimildarefni",
+    "Sakamál og spenna", "Heilsa og líðan", "Hönnun, listir og lífið", "Náttúra og lífríki",
+    "Flakk, bras og basl", "Leikið efni fyrir ungt fólk", "Síðasti séns",
+]
+ISLENSKIR_RENNINGAR = {"Íslenskar þáttaraðir", "Íslenskar heimildarmyndir", "Íslenskt heimildarefni"}
 IMDB_GAGNASLOD = "https://datasets.imdbws.com/"
 
 MAPPA = Path(__file__).resolve().parent
 GAGNAMAPPA = MAPPA / "imdb_gögn"
 UTTAKSSKRA = MAPPA / "rúv_kvikmyndir.csv"
+UTTAKSSKRA_THAETTIR = MAPPA / "rúv_þættir.csv"
 VEFGOGN = MAPPA / "docs" / "gogn.js"  # lesið af docs/index.html (GitHub Pages)
 
 HAMARKSALDUR_GAGNA = 7 * 24 * 3600  # sekúndur; sækja IMDb-gögn aftur eftir viku
 LAGMARKSATKVAEDI = 1000  # m í veginni einkunn: (v·R + m·C) / (v + m)
+LAGMARKSATKVAEDI_THAETTIR = 300  # þættir (ekki síst norrænir og íslenskir) fá færri atkvæði
 TEGUNDIR = {"movie", "tvMovie", "short", "video", "tvSpecial"}
+TEGUNDIR_RADIR = {"tvSeries", "tvMiniSeries"}
 
 # OMDb (https://www.omdbapi.com/) gefur Rotten Tomatoes- og Metacritic-einkunnir eftir IMDb-auðkenni.
 # Lykill í umhverfisbreytunni OMDB_API_KEY eða í omdb_lykill.txt (í .gitignore, aldrei í git).
@@ -74,6 +91,45 @@ def ruv_listi():
             "þáttur_id": m.group(2),
         }
     return myndir
+
+
+def ruv_renningar(fyrirsagnir):
+    """Skilar {dagskrárliður_id: {..., "renningar": [...]}} fyrir alla dagskrárliði í
+    renningunum `fyrirsagnir` á yfirlitssíðunni."""
+    soup = BeautifulSoup(saekja(YFIRLIT_URL).content, "html.parser")
+    slugs = {}
+    for section in soup.find_all("section", attrs={"data-slug": True}):
+        h2 = section.find("h2")
+        if h2:
+            slugs[h2.get_text(strip=True)] = section["data-slug"]
+    vantar = [f for f in fyrirsagnir if f not in slugs]
+    if vantar:
+        print("Renningar sem fundust ekki á RÚV (sleppt):", ", ".join(vantar))
+
+    lidir = {}
+    for fyrirsogn in fyrirsagnir:
+        if fyrirsogn not in slugs:
+            continue
+        gogn = apollo_gogn(saekja(f"{BASE_URL}/sjonvarp/renningur/{slugs[fyrirsogn]}").text)
+        featured = next((v for k, v in gogn.get("ROOT_QUERY", {}).items()
+                         if k.startswith("Featured(")), {})
+        panel = next((p for k, v in featured.items() if k.startswith("panels(")
+                      for p in v or []), {})
+        for tilvisun in panel.get("programs") or []:
+            dl = gogn.get(tilvisun["__ref"], {})
+            thaettir = [e["__ref"].split(":", 1)[1] for e in dl.get("episodes") or []]
+            if not dl.get("programID") or not thaettir:
+                continue
+            id_ = str(dl["programID"])
+            lidur = lidir.setdefault(id_, {
+                "íslenskur_titill": (dl.get("title") or "").strip(),
+                "hlekkur": f"{BASE_URL}/sjonvarp/spila/{dl['slug']}/{id_}/{thaettir[0]}",
+                "þáttur_id": thaettir[0],
+                "renningar": [],
+            })
+            lidur["renningar"].append(fyrirsogn)
+        time.sleep(random.uniform(0.3, 0.8))
+    return lidir
 
 
 def apollo_gogn(html):
@@ -122,6 +178,15 @@ def ruv_upplysingar(id_, mynd):
         mynd["lengd_mín"] = round(thattur["duration"] / 60)
     mynd["aðgengileg_til"] = thattur.get("file_expires")
 
+    # Þættir: fjöldi þátta í spilaranum og fyrsti gildistími (aðeins sumir þættir hafa hann)
+    tilvisanir = next((v for k, v in dagskrarlidur.items()
+                       if k.startswith("episodes(") and '"limit":50' in k), [])
+    thaettir = [gogn[r["__ref"]] for r in tilvisanir if r.get("__ref") in gogn]
+    mynd["fjöldi_þátta"] = len(thaettir) or None
+    gildistimar = sorted(e["file_expires"] for e in thaettir if e.get("file_expires"))
+    if gildistimar:
+        mynd["aðgengileg_til"] = gildistimar[0]
+
 
 # ---------------------------------------------------------------- IMDb
 
@@ -151,25 +216,26 @@ def saekja_gagnaskra(nafn):
 
 
 def imdb_gogn():
-    """Skilar töflu yfir kvikmyndir á IMDb sem hafa einkunn, með stöðluðum titlum."""
+    """Skilar töflu yfir kvikmyndir og þáttaraðir á IMDb sem hafa einkunn, með stöðluðum titlum."""
     grunnur = saekja_gagnaskra("title.basics.tsv.gz")
     einkunnir = saekja_gagnaskra("title.ratings.tsv.gz")
     unnid = GAGNAMAPPA / "imdb_kvikmyndir.pkl"
     if unnid.exists() and unnid.stat().st_mtime >= max(
             grunnur.stat().st_mtime, einkunnir.stat().st_mtime):
         myndir = pd.read_pickle(unnid)
-        if "genres" in myndir:  # annars eldri útgáfa; vinna aftur
+        if "endYear" in myndir:  # annars eldri útgáfa; vinna aftur
             return myndir
 
     print("Vinn úr IMDb-gögnum (gert einu sinni eftir hvert niðurhal)...")
     lesa = dict(sep="\t", quoting=csv.QUOTE_NONE, dtype=str,
                 na_values=["\\N"], keep_default_na=False)
     bitar = pd.read_csv(grunnur, usecols=["tconst", "titleType", "primaryTitle",
-                                          "originalTitle", "startYear", "genres"],
+                                          "originalTitle", "startYear", "endYear", "genres"],
                         chunksize=500_000, **lesa)
-    myndir = pd.concat(b[b["titleType"].isin(TEGUNDIR)] for b in bitar)
+    myndir = pd.concat(b[b["titleType"].isin(TEGUNDIR | TEGUNDIR_RADIR)] for b in bitar)
     myndir = myndir.merge(pd.read_csv(einkunnir, **lesa), on="tconst")
     myndir["startYear"] = pd.to_numeric(myndir["startYear"], errors="coerce")
+    myndir["endYear"] = pd.to_numeric(myndir["endYear"], errors="coerce")
     myndir["averageRating"] = myndir["averageRating"].astype(float)
     myndir["numVotes"] = myndir["numVotes"].astype(int)
     myndir["n_aðal"] = myndir["primaryTitle"].map(stadla)
@@ -179,30 +245,78 @@ def imdb_gogn():
     return myndir
 
 
-def imdb_uppfletting(imdb, titlar, ar):
+def an_radar(titill):
+    """„Laundóttirin II“ → „Laundóttirin“, „Dalgliesh III“ → „Dalgliesh“, „Úti 3“ → „Úti“:
+    IMDb skráir þáttaröð í heild, ekki hverja seríu."""
+    if not titill:
+        return None
+    styttur = re.sub(r"[\s:–-]+(?:(?:season|series|sería|þáttaröð)\s*\d{1,2}|[IVX]+|\d{1,2})$",
+                     "", titill, flags=re.IGNORECASE).strip()
+    return styttur if styttur and styttur != titill else None
+
+
+def imdb_uppfletting(imdb, titlar, ar, tegundir=TEGUNDIR, radir_fyrst=False,
+                     strangt=False, upprunalegir=()):
     """Finnur bestu samsvörun: sami (staðlaði) titill og ár ±1.
 
-    Sé árið óþekkt er tekin sú mynd með titilinn sem flest atkvæði hefur.
+    Þáttaraðir mega hafa byrjað fyrr: árið í lýsingu RÚV á oft við seríuna sem er sýnd,
+    svo það má vera hvar sem er á tímabili raðarinnar. Sé árið óþekkt er tekinn sá titill
+    sem flest atkvæði hefur. `radir_fyrst` tekur þáttaraðir fram yfir stakar myndir.
+
+    `strangt`: sé árið óþekkt og fleiri en einn titill kemur til greina er aðeins tekinn
+    sá vinsælasti ef hann hefur a.m.k. tífalt fleiri atkvæði en sá næsti (annars gæti
+    norskur þáttur sem heitir „Gift“ fengið einkunn Hollywood-myndarinnar „The Gift“).
+    Titlar í `upprunalegir` (íslenskir titlar) verða að passa við upprunalegan titil á IMDb.
     """
+    imdb = imdb[imdb["titleType"].isin(tegundir)]
     for titill in titlar:
         q = stadla(titill) if titill else ""
         if not q:
             continue
-        frambjodendur = imdb[(imdb["n_aðal"] == q) | (imdb["n_upprunal"] == q)]
+        if titill in upprunalegir:
+            frambjodendur = imdb[imdb["n_upprunal"] == q]
+        else:
+            frambjodendur = imdb[(imdb["n_aðal"] == q) | (imdb["n_upprunal"] == q)]
+        er_rod = frambjodendur["titleType"].isin(TEGUNDIR_RADIR)
         if ar:
-            frambjodendur = frambjodendur[(frambjodendur["startYear"] - ar).abs() <= 1]
+            lok = frambjodendur["endYear"].fillna(time.localtime().tm_year)
+            innan = (frambjodendur["startYear"] - ar).abs() <= 1
+            innan |= er_rod & (frambjodendur["startYear"] - 1 <= ar) & (ar <= lok + 1)
+            frambjodendur, er_rod = frambjodendur[innan], er_rod[innan]
         if frambjodendur.empty:
             continue
         rett_ar = frambjodendur["startYear"] == ar if ar else False
-        return (frambjodendur.assign(rett_ar=rett_ar)
-                .sort_values(["rett_ar", "numVotes"], ascending=False)
-                .iloc[0])
+        rod = er_rod if radir_fyrst else ~er_rod
+        rodud = (frambjodendur.assign(rett_ar=rett_ar, rod=rod)
+                 .sort_values(["rod", "rett_ar", "numVotes"], ascending=False))
+        if strangt and not ar:
+            # Aðeins borið saman innan þeirrar tegundar sem er tekin fram yfir hina
+            rodud = rodud[rodud["rod"] == rodud["rod"].iloc[0]]
+            # Nákvæmlega sami titill (t.d. „Kanarí“, ekki „Kanari“ eða „The Gift“) gengur fyrir
+            nakvaem = (rodud["primaryTitle"].str.casefold() == titill.casefold()) | (
+                rodud["originalTitle"].str.casefold() == titill.casefold())
+            if nakvaem.any():
+                rodud = rodud[nakvaem]
+            atkv = rodud["numVotes"].tolist()
+            if len(atkv) > 1 and atkv[0] < 5 * atkv[1]:
+                continue
+        return rodud.iloc[0]
     return None
 
 
+def lysing_segir_rod(lysing):
+    """True/False ef lýsing RÚV segir efnið vera þáttaröð/mynd (það orð sem kemur fyrst
+    ræður: „Heimildarmynd um … þáttaröðinni X“ er mynd), None ef hvorugt kemur fram."""
+    m = re.search(r"(þáttar[öa]ð|\bþátt(?:um|unum)\b|\bþættir\b)|(mynd)", lysing or "", re.IGNORECASE)
+    return None if not m else bool(m.group(1))
+
+
 def er_islensk(mynd, nidurstada):
-    """Íslensk ef fyrsta setning lýsingar RÚV segir það („Íslensk kvikmynd frá…“),
-    eða ef myndin hefur engan erlendan titil og upprunalegi titillinn á IMDb er sá íslenski."""
+    """Íslensk ef fyrsta setning lýsingar RÚV segir það („Íslensk kvikmynd frá…“), ef efnið
+    er í íslenskum renningi, eða ef það hefur engan erlendan titil og upprunalegi titillinn
+    á IMDb er sá íslenski."""
+    if ISLENSKIR_RENNINGAR & set(mynd.get("renningar") or []):
+        return True
     fyrsta_setning = re.split(r"(?<=[.!?])\s", mynd.get("lýsing") or "", maxsplit=1)[0]
     if re.search(r"\bíslensk", fyrsta_setning, re.IGNORECASE):
         return True
@@ -233,6 +347,8 @@ def lesa_omdb_einkunnir(svar):
         m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(%|/\s*100)", e.get("Value") or "")
         if lykill and m:
             einkunnir[lykill] = round(float(m.group(1)))
+    # Upprunaland, notað til að staðfesta samsvaranir þátta sem hafa ekkert ár
+    einkunnir["land"] = svar.get("Country") if svar.get("Country") not in (None, "N/A") else None
     return einkunnir
 
 
@@ -246,8 +362,9 @@ def omdb_einkunnir(tconst_listi):
     except (FileNotFoundError, json.JSONDecodeError):
         minni = {}
     lykill = omdb_lykill()
-    vantar = [t for t in tconst_listi
-              if time.time() - minni.get(t, {}).get("sótt", 0) > OMDB_HAMARKSALDUR]
+    vantar = [t for t in tconst_listi  # eldri færslur án „land“ eru sóttar aftur
+              if time.time() - minni.get(t, {}).get("sótt", 0) > OMDB_HAMARKSALDUR
+              or "land" not in minni[t]]
     if vantar and not lykill:
         print(f"Enginn OMDb-lykill (OMDB_API_KEY eða {OMDB_LYKILSKRA.name}); "
               f"sleppi Rotten Tomatoes/Metacritic fyrir {len(vantar)} myndir.")
@@ -277,80 +394,104 @@ def omdb_einkunnir(tconst_listi):
 # ---------------------------------------------------------------- Keyrsla
 
 
-def skrifa_vefgogn(df):
+def skrifa_vefgogn(myndir, thaettir):
     """Skrifar gögnin sem JS-skrá svo docs/index.html virki bæði á GitHub Pages
     og þegar hún er opnuð beint af diski (fetch() virkar ekki á file://)."""
     gogn = {
         "uppfært": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "myndir": json.loads(df.to_json(orient="records", force_ascii=False)),
+        "myndir": json.loads(myndir.to_json(orient="records", force_ascii=False)),
+        "þættir": json.loads(thaettir.to_json(orient="records", force_ascii=False)),
     }
     VEFGOGN.parent.mkdir(exist_ok=True)
     VEFGOGN.write_text("window.RUV_GOGN = " + json.dumps(gogn, ensure_ascii=False, indent=1)
                        + ";\n", encoding="utf-8")
 
 
-def main():
-    myndir = ruv_listi()
-    if not myndir:
-        raise SystemExit(f"Engar kvikmyndir fundust á {START_URL}; "
-                         "hefur RÚV breytt síðunni?")
-    print("Alls eru", len(myndir), "kvikmyndir í boði á RÚV")
-
-    for id_, mynd in tqdm(myndir.items(), desc="Sæki upplýsingar frá RÚV"):
+def saekja_ruv_upplysingar(lidir, lysing):
+    for id_, lidur in tqdm(lidir.items(), desc=lysing):
         try:
-            ruv_upplysingar(id_, mynd)
+            ruv_upplysingar(id_, lidur)
         except Exception as villa:  # ein biluð síða á ekki að stöðva keyrsluna
-            tqdm.write(f"Villa við {mynd['hlekkur']}: {villa}")
+            tqdm.write(f"Villa við {lidur['hlekkur']}: {villa}")
         time.sleep(random.uniform(0.5, 1.5))
 
-    imdb = imdb_gogn()
-    for mynd in myndir.values():
-        nidurstada = imdb_uppfletting(
-            imdb, [mynd.get("erl_titill"), mynd["íslenskur_titill"]], mynd.get("ár"))
-        mynd["íslensk"] = er_islensk(mynd, nidurstada)
+
+def tengja_imdb(imdb, lidir, thaettir=False):
+    for lidur in lidir.values():
+        titlar = [lidur.get("erl_titill"), lidur["íslenskur_titill"]]
+        if thaettir:
+            titlar += [an_radar(t) for t in titlar]
+            # Þáttaröð að sögn RÚV → aðeins þáttaraðir á IMDb. Margir þættir í spilaranum
+            # → þáttaraðir ganga fyrir (en RÚV skiptir stundum myndum í hluta).
+            texti = lysing_segir_rod(lidur.get("lýsing"))
+            nidurstada = imdb_uppfletting(
+                imdb, titlar, lidur.get("ár"),
+                tegundir=TEGUNDIR_RADIR if texti else TEGUNDIR | TEGUNDIR_RADIR,
+                radir_fyrst=bool(texti) or (lidur.get("fjöldi_þátta") or 0) > 1,
+                strangt=True,
+                upprunalegir={lidur["íslenskur_titill"], an_radar(lidur["íslenskur_titill"])})
+        else:
+            nidurstada = imdb_uppfletting(imdb, titlar, lidur.get("ár"))
+        lidur["íslensk"] = er_islensk(lidur, nidurstada)
         if nidurstada is None:
             continue
-        mynd["imdb_einkunn"] = nidurstada["averageRating"]
-        mynd["imdb_atkvæði"] = nidurstada["numVotes"]
-        mynd["imdb_titill"] = nidurstada["primaryTitle"]
+        lidur["imdb_einkunn"] = nidurstada["averageRating"]
+        lidur["imdb_atkvæði"] = nidurstada["numVotes"]
+        lidur["imdb_titill"] = nidurstada["primaryTitle"]
+        lidur["imdb_tegund"] = nidurstada["titleType"]
         if pd.notna(nidurstada["genres"]):
-            mynd["imdb_flokkar"] = nidurstada["genres"]
+            lidur["imdb_flokkar"] = nidurstada["genres"]
         if pd.notna(nidurstada["startYear"]):
-            mynd["imdb_ár"] = int(nidurstada["startYear"])
-        mynd["imdb_hlekkur"] = f"https://www.imdb.com/title/{nidurstada['tconst']}/"
-        mynd["tconst"] = nidurstada["tconst"]
+            lidur["imdb_ár"] = int(nidurstada["startYear"])
+        lidur["imdb_hlekkur"] = f"https://www.imdb.com/title/{nidurstada['tconst']}/"
+        lidur["tconst"] = nidurstada["tconst"]
 
-    omdb = omdb_einkunnir([m["tconst"] for m in myndir.values() if "tconst" in m])
-    for mynd in myndir.values():
-        e = omdb.get(mynd.get("tconst"), {})
-        mynd["rt_einkunn"] = e.get("rt")
-        mynd["mc_einkunn"] = e.get("mc")
 
-    df = pd.DataFrame(list(myndir.values()))
-    if "imdb_einkunn" not in df:
-        df["imdb_einkunn"] = df["imdb_atkvæði"] = float("nan")
-    # Vegin einkunn (eins og IMDb Top 250) svo myndir með fá atkvæði trónir ekki efst
+# Þjóðerni í lýsingum RÚV („norsk þáttaröð“, „í þessum dönsku þáttum“) → land eins og OMDb ritar það
+THJODERNI = {
+    "norsk": "Norway", "sænsk": "Sweden", "dönsk": "Denmark", "dansk": "Denmark",
+    "finnsk": "Finland", "færeysk": "Faroe Islands", "íslensk": "Iceland",
+    "grænlensk": "Greenland", "bresk": "United Kingdom", "bandarísk": "United States",
+    "kanadísk": "Canada", "áströlsk": "Australia", "ástralsk": "Australia", "þýsk": "Germany",
+    "frönsk": "France", "fransk": "France", "ítölsk": "Italy", "ítalsk": "Italy",
+    "spænsk": "Spain", "pólsk": "Poland", "hollensk": "Netherlands", "írsk": "Ireland",
+    "belgísk": "Belgium", "portúgölsk": "Portugal", "portúgalsk": "Portugal",
+    "brasilísk": "Brazil", "japönsk": "Japan", "japansk": "Japan",
+}
+
+
+def land_stangast_a(lysing, land):
+    """True ef lýsing RÚV nefnir þjóðerni en ekkert þeirra er meðal upprunalanda á OMDb."""
+    if not land:
+        return False
+    nefnd = {THJODERNI[m.casefold()] for m in re.findall(
+        r"\b(" + "|".join(THJODERNI) + r")", lysing or "", re.IGNORECASE)}
+    return bool(nefnd) and not any(n in land for n in nefnd)
+
+
+def tafla(lidir, dalkar, lagmark):
+    df = pd.DataFrame(list(lidir.values()))
+    for dalkur in ("imdb_einkunn", "imdb_atkvæði", "rt_einkunn", "mc_einkunn"):
+        if dalkur not in df:
+            df[dalkur] = float("nan")
+    # Vegin einkunn (eins og IMDb Top 250) svo efni með fá atkvæði trónir ekki efst
     medaltal = df["imdb_einkunn"].mean()
-    v, r, m = df["imdb_atkvæði"], df["imdb_einkunn"], LAGMARKSATKVAEDI
+    v, r, m = df["imdb_atkvæði"], df["imdb_einkunn"], lagmark
     df["vegin_einkunn"] = ((v * r + m * medaltal) / (v + m)).round(2)
     # Rotten Tomatoes og Metacritic eru aðeins sýndar, ekki notaðar í röðun: fæstar íslenskar
     # myndir hafa þær, og RT (hlutfall jákvæðra dóma) myndi lyfta þeim myndum sem hafa þær.
     for dalkur in ("rt_einkunn", "mc_einkunn"):
         df[dalkur] = pd.to_numeric(df[dalkur], errors="coerce")
+    heiltolur = {d: "Int64" for d in ("ár", "imdb_ár", "imdb_atkvæði", "rt_einkunn",
+                                      "mc_einkunn", "lengd_mín", "fjöldi_þátta") if d in dalkar}
+    return (df.reindex(columns=dalkar)
+            .sort_values(["vegin_einkunn", "imdb_einkunn"], ascending=False, na_position="last")
+            .astype(heiltolur))
 
-    dalkar = ["íslenskur_titill", "erl_titill", "ár", "íslensk", "vegin_einkunn", "imdb_einkunn",
-              "imdb_atkvæði", "rt_einkunn", "mc_einkunn", "lengd_mín", "aðgengileg_til",
-              "imdb_titill", "imdb_ár", "imdb_hlekkur", "imdb_flokkar", "lýsing", "hlekkur", "mynd"]
-    df = (df.reindex(columns=dalkar)
-          .sort_values(["vegin_einkunn", "imdb_einkunn"], ascending=False, na_position="last")
-          .astype({"ár": "Int64", "imdb_ár": "Int64", "imdb_atkvæði": "Int64",
-                   "rt_einkunn": "Int64", "mc_einkunn": "Int64", "lengd_mín": "Int64"}))
-    # utf-8-sig svo Excel sýni íslenska stafi rétt
-    df.to_csv(UTTAKSSKRA, index=False, encoding="utf-8-sig")
-    skrifa_vefgogn(df)
 
+def prenta_samantekt(df, heiti, skra):
     fundnar = df["imdb_einkunn"].notna()
-    print(f"\n{fundnar.sum()} af {len(df)} myndum fundust á IMDb. Vistað í {UTTAKSSKRA.name}\n")
+    print(f"\n{fundnar.sum()} af {len(df)} {heiti} fundust á IMDb. Vistað í {skra.name}\n")
     print(df.loc[fundnar, ["íslenskur_titill", "ár", "vegin_einkunn", "imdb_einkunn",
                            "rt_einkunn", "mc_einkunn", "aðgengileg_til"]].head(15).to_string(index=False))
     if (~fundnar).any():
@@ -359,6 +500,57 @@ def main():
             erl = rod["erl_titill"] if pd.notna(rod["erl_titill"]) else "–"
             ar = rod["ár"] if pd.notna(rod["ár"]) else "?"
             print(f"  {rod['íslenskur_titill']} ({erl}, {ar})")
+
+
+def main():
+    myndir = ruv_listi()
+    if not myndir:
+        raise SystemExit(f"Engar kvikmyndir fundust á {START_URL}; "
+                         "hefur RÚV breytt síðunni?")
+    print("Alls eru", len(myndir), "kvikmyndir í boði á RÚV")
+    # Kvikmyndir sem eru líka í renningi (t.d. „Síðasti séns“) eru aðeins taldar sem kvikmyndir
+    thaettir = {k: v for k, v in ruv_renningar(RENNINGAR).items() if k not in myndir}
+    print("og", len(thaettir), "aðrir dagskrárliðir í völdum renningum")
+
+    saekja_ruv_upplysingar(myndir, "Sæki upplýsingar um kvikmyndir frá RÚV")
+    saekja_ruv_upplysingar(thaettir, "Sæki upplýsingar um þætti frá RÚV")
+
+    imdb = imdb_gogn()
+    tengja_imdb(imdb, myndir)
+    tengja_imdb(imdb, thaettir, thaettir=True)
+
+    allt = list(myndir.values()) + list(thaettir.values())
+    omdb = omdb_einkunnir(list(dict.fromkeys(m["tconst"] for m in allt if "tconst" in m)))
+    # Þættir án árs geta lent á röngum titli með sama nafni (t.d. japönskum „Gift“ í stað
+    # norsks); hafna samsvörun ef upprunaland á OMDb passar ekki við lýsingu RÚV
+    for lidur in thaettir.values():
+        e = omdb.get(lidur.get("tconst"), {})
+        if not lidur.get("ár") and land_stangast_a(lidur.get("lýsing"), e.get("land")):
+            print(f"Hafna IMDb-samsvörun {lidur['íslenskur_titill']} → {lidur['imdb_titill']} "
+                  f"({e['land']})")
+            for k in [k for k in lidur if k.startswith("imdb_") or k == "tconst"]:
+                del lidur[k]
+    for lidur in allt:
+        e = omdb.get(lidur.get("tconst"), {})
+        lidur["rt_einkunn"] = e.get("rt")
+        lidur["mc_einkunn"] = e.get("mc")
+
+    dalkar = ["íslenskur_titill", "erl_titill", "ár", "íslensk", "vegin_einkunn", "imdb_einkunn",
+              "imdb_atkvæði", "rt_einkunn", "mc_einkunn", "lengd_mín", "aðgengileg_til",
+              "imdb_titill", "imdb_ár", "imdb_hlekkur", "imdb_flokkar", "lýsing", "hlekkur", "mynd"]
+    df_myndir = tafla(myndir, dalkar, LAGMARKSATKVAEDI)
+    dalkar_th = (dalkar[:10] + ["fjöldi_þátta"] + dalkar[10:13] + ["imdb_tegund"]
+                 + dalkar[13:] + ["renningar"])
+    df_thaettir = tafla(thaettir, dalkar_th, LAGMARKSATKVAEDI_THAETTIR)
+
+    # utf-8-sig svo Excel sýni íslenska stafi rétt
+    df_myndir.to_csv(UTTAKSSKRA, index=False, encoding="utf-8-sig")
+    (df_thaettir.assign(renningar=df_thaettir["renningar"].map(" | ".join))
+     .to_csv(UTTAKSSKRA_THAETTIR, index=False, encoding="utf-8-sig"))
+    skrifa_vefgogn(df_myndir, df_thaettir)
+
+    prenta_samantekt(df_myndir, "myndum", UTTAKSSKRA)
+    prenta_samantekt(df_thaettir, "þáttum", UTTAKSSKRA_THAETTIR)
 
 
 if __name__ == "__main__":

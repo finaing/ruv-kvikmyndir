@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kvikmyndir á RÚV</title>
-<meta name="description" content="Kvikmyndir sem eru aðgengilegar í spilara RÚV, raðað eftir IMDb-einkunn, með einkunnum frá Rotten Tomatoes og Metacritic.">
+<title>Kvikmyndir og þættir á RÚV</title>
+<meta name="description" content="Kvikmyndir og þættir sem eru aðgengilegir í spilara RÚV, raðað eftir IMDb-einkunn, með einkunnum frá Rotten Tomatoes og Metacritic.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230073a0'/><path d='M12 9l11 7-11 7z' fill='white'/></svg>">
 <style>
   :root {
@@ -14,6 +14,7 @@
     --muted: #63636e;
     --line: #e3e1db;
     --accent: #0073a0;
+    --on-accent: #ffffff;
     --chip: #efede8;
     --warn-bg: #fff1d6;
     --warn-text: #8a5300;
@@ -25,7 +26,7 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #121215; --surface: #1c1c21; --text: #ececf0; --muted: #9c9ca8;
-      --line: #2c2c33; --accent: #4fb3e0; --chip: #26262d;
+      --line: #2c2c33; --accent: #4fb3e0; --on-accent: #0d1a22; --chip: #26262d;
       --warn-bg: #3a2c10; --warn-text: #ffc66b;
       --score-hi: #4fd18b; --score-mid: #e6c34a; --score-lo: #8d8d98;
       --shadow: none;
@@ -33,7 +34,7 @@
   }
   :root[data-theme="dark"] {
     --bg: #121215; --surface: #1c1c21; --text: #ececf0; --muted: #9c9ca8;
-    --line: #2c2c33; --accent: #4fb3e0; --chip: #26262d;
+    --line: #2c2c33; --accent: #4fb3e0; --on-accent: #0d1a22; --chip: #26262d;
     --warn-bg: #3a2c10; --warn-text: #ffc66b;
     --score-hi: #4fd18b; --score-mid: #e6c34a; --score-lo: #8d8d98;
     --shadow: none;
@@ -49,9 +50,34 @@
   .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 
   header { padding: 40px 0 20px; }
+  .flipar {
+    flex: 1 1 400px; display: flex; gap: 6px; padding: 6px; max-width: 560px;
+    border-radius: 14px; background: var(--chip); border: 1px solid var(--line);
+  }
+  .flipar button {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center;
+    font: inherit; font-size: 1.05rem; font-weight: 700; color: var(--muted); background: none;
+    border: 0; border-radius: 10px; padding: 12px 16px; min-height: 48px; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .flipar button:hover { color: var(--text); background: var(--surface); }
+  .flipar button[aria-selected="true"] { background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow); }
+  .flipar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .flipar button small {
+    font-size: .8rem; font-weight: 600; padding: 1px 8px; border-radius: 99px;
+    background: var(--surface); color: var(--muted);
+  }
+  .flipar button[aria-selected="true"] small { background: rgba(255,255,255,.22); color: inherit; }
+  @media (max-width: 640px) { .flipar button { font-size: .95rem; padding: 10px 8px; } }
+  [hidden] { display: none !important; }
   h1 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.3rem); letter-spacing: -.02em; line-height: 1.15; }
   h1 span { color: var(--accent); }
   .sub { margin: 8px 0 0; color: var(--muted); }
+  .flipar-rod { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 20px; }
+  .athugasemd {
+    flex: 1 1 260px; margin: 0; padding: 10px 14px; border-radius: 10px;
+    background: var(--warn-bg); color: var(--warn-text); font-size: .92rem;
+  }
 
   .controls {
     position: sticky; top: 0; z-index: 2; background: var(--bg);
@@ -128,8 +154,15 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Kvikmyndir á <span>RÚV</span></h1>
+    <h1><b id="fyrirsogn">Kvikmyndir</b> á <span>RÚV</span></h1>
     <p class="sub" id="sub">Allar kvikmyndir í spilara RÚV, raðað eftir IMDb-einkunn.</p>
+    <div class="flipar-rod">
+    <div class="flipar" role="tablist" aria-label="Tegund efnis">
+      <button type="button" role="tab" id="flipi-myndir" aria-selected="true">Kvikmyndir<small id="fjoldi-myndir"></small></button>
+      <button type="button" role="tab" id="flipi-thaettir" aria-selected="false">Þættir og heimildarmyndir<small id="fjoldi-thaettir"></small></button>
+    </div>
+    <p class="athugasemd" id="athugasemd" hidden>Athugið að fjölmargar þáttaraðir og heimildarmyndir hafa enga einkunn, en kunna engu síður að vera góðar og áhugaverðar.</p>
+    </div>
   </header>
 
   <div class="controls">
@@ -139,12 +172,13 @@
       <option value="imdb">Hæsta IMDb-einkunn (óvegin)</option>
       <option value="vinsaelt">Flest atkvæði</option>
       <option value="fer">Fer bráðum</option>
-      <option value="nyjast">Nýjustu myndirnar</option>
+      <option value="nyjast">Nýjast</option>
     </select>
     <select id="flokkur" aria-label="Flokkur"><option value="">Allir flokkar</option></select>
+    <select id="renningur" aria-label="Renningur á RÚV" hidden><option value="">Allir renningar RÚV</option></select>
     <div class="checks">
-      <label><input type="checkbox" id="islenskar"> Aðeins íslenskar myndir</label>
-      <label><input type="checkbox" id="allar"> Sýna líka myndir án einkunnar</label>
+      <label><input type="checkbox" id="islenskar"> Aðeins íslenskt</label>
+      <label><input type="checkbox" id="allar"> Sýna líka án einkunnar <span id="fjoldi-an"></span></label>
     </div>
   </div>
 
@@ -152,7 +186,7 @@
   <ol id="listi"></ol>
 
   <footer>
-    <p>„Hæsta einkunn“ er IMDb-einkunn vegin eftir fjölda atkvæða. Einkunnir af vefjunum Rotten Tomatoes og Metacritic eru sýndar til fróðleiks en myndum er ekki raðað eftir þeim, þar sem fæstar íslenskar myndir hafa þær. IMDb-einkunnir koma úr <a href="https://developer.imdb.com/non-commercial-datasets/">opinberum gagnasöfnum IMDb</a> og Rotten Tomatoes og Metacritic eru fengnar úr <a href="https://www.omdbapi.com/">OMDb</a>; upplýsingar um kvikmyndirnar eru annars af vef <a href="https://www.ruv.is/sjonvarp/flokkur/kvikmyndir">RÚV</a>. Athugið að þessi síða er ekki tengd RÚV, IMDb, Rotten Tomatoes eða Metacritic.</p>
+    <p>„Hæsta einkunn“ er IMDb-einkunn vegin eftir fjölda atkvæða. Þáttaraðir fá einkunn raðarinnar í heild á IMDb, ekki einstakrar seríu, og eru sóttar úr völdum renningum á <a href="https://www.ruv.is/sjonvarp/">forsíðu sjónvarpshluta RÚV</a>. Einkunnir af vefjunum Rotten Tomatoes og Metacritic eru sýndar til fróðleiks en myndum er ekki raðað eftir þeim, þar sem fæstar íslenskar myndir hafa þær. IMDb-einkunnir koma úr <a href="https://developer.imdb.com/non-commercial-datasets/">opinberum gagnasöfnum IMDb</a> og Rotten Tomatoes og Metacritic eru fengnar úr <a href="https://www.omdbapi.com/">OMDb</a>; upplýsingar um efnið eru annars af vef <a href="https://www.ruv.is/sjonvarp/flokkur/kvikmyndir">RÚV</a>. Athugið að þessi síða er ekki tengd RÚV, IMDb, Rotten Tomatoes eða Metacritic.</p>
   </footer>
 </div>
 
@@ -176,16 +210,57 @@
 
   const idag = new Date(); idag.setHours(0, 0, 0, 0);
   const dagarEftir = (d) => d ? Math.round((new Date(d + "T00:00:00") - idag) / 864e5) : null;
-  const myndir = gogn.myndir
+  const undirbua = (listi) => (listi || [])
     .map((m) => ({ ...m, flokkar: m.imdb_flokkar ? m.imdb_flokkar.split(",") : [], dagar: dagarEftir(m["aðgengileg_til"]) }))
     .filter((m) => m.dagar === null || m.dagar >= 0);
+  const eintala = (n) => n % 10 === 1 && n % 100 !== 11;
+  const TEGUNDIR = {
+    myndir: {
+      listi: undirbua(gogn.myndir), heiti: "Kvikmyndir", thgf: "myndum", ekkert: "Engar myndir passa við leitina.",
+      ord: (n) => eintala(n) ? "kvikmynd" : "kvikmyndir",
+    },
+    thaettir: {
+      listi: undirbua(gogn["þættir"]), heiti: "Þættir", thgf: "titlum", ekkert: "Ekkert efni passar við leitina.",
+      ord: (n) => eintala(n) ? "titill" : "titlar",
+    },
+  };
+  if (!TEGUNDIR.thaettir.listi.length) document.querySelector(".flipar-rod").hidden = true;
+  let tegund = "myndir";
+  let myndir = TEGUNDIR.myndir.listi;
 
   const MAN = ["janúar", "febrúar", "mars", "apríl", "maí", "júní", "júlí", "ágúst", "september", "október", "nóvember", "desember"];
   const uppfaert = new Date(gogn["uppfært"]);
-  $("sub").textContent = `${myndir.length} ${myndir.length % 10 === 1 && myndir.length % 100 !== 11 ? "kvikmynd" : "kvikmyndir"} í spilara RÚV, raðað eftir IMDb-einkunn. Uppfært ${uppfaert.getDate()}. ${MAN[uppfaert.getMonth()]} ${uppfaert.getFullYear()}.`;
+  const uppfaertTexti = `Uppfært ${uppfaert.getDate()}. ${MAN[uppfaert.getMonth()]} ${uppfaert.getFullYear()}.`;
+  $("fjoldi-myndir").textContent = TEGUNDIR.myndir.listi.length;
+  $("fjoldi-thaettir").textContent = TEGUNDIR.thaettir.listi.length;
 
-  const allirFlokkar = [...new Set(myndir.flatMap((m) => m.flokkar))].sort((a, b) => (FLOKKAR[a] || a).localeCompare(FLOKKAR[b] || b, "is"));
-  for (const f of allirFlokkar) $("flokkur").add(new Option(FLOKKAR[f] || f, f));
+  function fyllaVal(id, gildi, merki, fyrsti) {
+    const val = $(id), adur = val.value;
+    val.replaceChildren(new Option(fyrsti, ""));
+    for (const g of gildi) val.add(new Option(merki(g), g));
+    val.value = gildi.includes(adur) ? adur : "";
+  }
+
+  function veljaTegund(ny) {
+    tegund = ny;
+    myndir = TEGUNDIR[tegund].listi;
+    $("flipi-myndir").setAttribute("aria-selected", tegund === "myndir");
+    $("flipi-thaettir").setAttribute("aria-selected", tegund === "thaettir");
+    $("fyrirsogn").textContent = TEGUNDIR[tegund].heiti;
+    const n = myndir.length;
+    const an = myndir.filter((m) => m.imdb_einkunn == null).length;
+    $("sub").textContent = (tegund === "myndir"
+      ? `${n} ${TEGUNDIR.myndir.ord(n)}`
+      : `${n} ${eintala(n) ? "þáttaröð eða heimildarmynd" : "þáttaraðir og heimildarmyndir"}`)
+      + ` í spilara RÚV, þar af ${an} án einkunnar. Raðað eftir IMDb-einkunn. ${uppfaertTexti}`;
+    $("fjoldi-an").textContent = `(${an})`;
+    $("athugasemd").hidden = tegund !== "thaettir";
+    const allirFlokkar = [...new Set(myndir.flatMap((m) => m.flokkar))].sort((a, b) => (FLOKKAR[a] || a).localeCompare(FLOKKAR[b] || b, "is"));
+    fyllaVal("flokkur", allirFlokkar, (f) => FLOKKAR[f] || f, "Allir flokkar");
+    const renningar = [...new Set(myndir.flatMap((m) => m.renningar || []))];
+    fyllaVal("renningur", renningar, (r) => r, "Allir renningar RÚV");
+    $("renningur").hidden = !renningar.length;
+  }
 
   const fmtNum = new Intl.NumberFormat("is-IS");
   const fmtDags = (d) => { const t = new Date(d + "T00:00:00"); return `${t.getDate()}. ${MAN[t.getMonth()].slice(0, 3)}.`; };
@@ -215,7 +290,10 @@
     const ar = m["ár"] ?? m.imdb_ár;
     const erl = m.erl_titill && m.erl_titill !== m["íslenskur_titill"] ? m.erl_titill
               : (!m.erl_titill && m.imdb_titill && m.imdb_titill !== m["íslenskur_titill"] ? m.imdb_titill : null);
-    const meta = [erl, ar, m["lengd_mín"] ? `${m["lengd_mín"]} mín.` : null].filter(Boolean).map(esc).join(" · ");
+    const fjoldi = m["fjöldi_þátta"];
+    const thaettir = fjoldi > 1 ? `${fjoldi} ${eintala(fjoldi) ? "þáttur" : "þættir"}` : null;
+    const lengd = m["lengd_mín"] ? `${thaettir ? "u.þ.b. " : ""}${m["lengd_mín"]} mín.` : null;
+    const meta = [erl, ar, thaettir, lengd].filter(Boolean).map(esc).join(" · ");
     const tags = m.flokkar.map((f) => `<span class="tag">${esc(FLOKKAR[f] || f)}</span>`);
     if (m.dagar !== null && m.dagar <= 7) {
       tags.unshift(`<span class="tag warn">${m.dagar === 0 ? "Fer í dag" : m.dagar === 1 ? "Fer á morgun" : `Fer eftir ${m.dagar} daga`}</span>`);
@@ -252,14 +330,17 @@
     const flokkur = $("flokkur").value;
     const allar = $("allar").checked;
     const islenskar = $("islenskar").checked;
+    const renningur = $("renningur").value;
+    const T = TEGUNDIR[tegund];
     const synd = myndir
+      .filter((m) => !renningur || (m.renningar || []).includes(renningur))
       .filter((m) => allar || m.imdb_einkunn != null)
       .filter((m) => !islenskar || m["íslensk"])
       .filter((m) => !flokkur || m.flokkar.includes(flokkur))
       .filter((m) => !q || stadla([m["íslenskur_titill"], m.erl_titill, m.imdb_titill, m["lýsing"]].join(" ")).includes(q))
       .sort(RODUN[$("rodun").value]);
-    $("count").textContent = synd.length === myndir.length ? `${synd.length} myndir` : `${synd.length} af ${myndir.length} myndum`;
-    $("listi").innerHTML = synd.length ? synd.map(lina).join("") : '<li class="empty">Engar myndir passa við leitina.</li>';
+    $("count").textContent = synd.length === myndir.length ? `${synd.length} ${T.ord(synd.length)}` : `${synd.length} af ${myndir.length} ${T.thgf}`;
+    $("listi").innerHTML = synd.length ? synd.map(lina).join("") : `<li class="empty">${T.ekkert}</li>`;
   }
 
   $("listi").addEventListener("click", (e) => {
@@ -267,11 +348,23 @@
     const li = e.target.closest(".film");
     e.target.textContent = li.classList.toggle("open") ? "Minna" : "Meira";
   });
-  for (const id of ["leit", "rodun", "flokkur", "islenskar", "allar"]) $(id).addEventListener("input", teikna);
-  // Hægt að deila beinum hlekk: …/#islenskar
-  $("islenskar").checked = location.hash === "#islenskar";
-  $("islenskar").addEventListener("change", () =>
-    history.replaceState(null, "", $("islenskar").checked ? "#islenskar" : location.pathname + location.search));
+  for (const id of ["leit", "rodun", "flokkur", "renningur", "islenskar", "allar"]) $(id).addEventListener("input", teikna);
+
+  // Hægt að deila beinum hlekk: …/#thaettir, …/#islenskar eða …/#thaettir,islenskar
+  function uppfaeraHlekk() {
+    const hlutar = [tegund === "thaettir" && "thaettir", $("islenskar").checked && "islenskar"].filter(Boolean);
+    history.replaceState(null, "", hlutar.length ? "#" + hlutar.join(",") : location.pathname + location.search);
+  }
+  const hash = new Set(location.hash.slice(1).split(","));
+  $("islenskar").checked = hash.has("islenskar");
+  $("islenskar").addEventListener("change", uppfaeraHlekk);
+  for (const [id, ny] of [["flipi-myndir", "myndir"], ["flipi-thaettir", "thaettir"]]) {
+    $(id).addEventListener("click", () => {
+      if (tegund === ny) return;
+      veljaTegund(ny); uppfaeraHlekk(); teikna();
+    });
+  }
+  veljaTegund(hash.has("thaettir") && TEGUNDIR.thaettir.listi.length ? "thaettir" : "myndir");
   teikna();
 })();
 </script>
